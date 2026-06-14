@@ -19,6 +19,8 @@ const EMPTY = {
   portfolios: [], // portfolio evidence items keyed by userId
   institutions: [],
   aiLogs: [],
+  sessions: [], // active auth sessions: { token, userId, createdAt, expiresAt }
+  auditLogs: [], // security audit trail
 };
 
 function load() {
@@ -52,11 +54,62 @@ export const store = {
     persist();
     return user;
   },
+  // Create a credentialed account. `credentials` carries { salt, hash }.
+  createUser({ name, email, role = 'individual', org = null, credentials }) {
+    const user = {
+      id: randomUUID(), name, email, role, org,
+      passwordSalt: credentials?.salt || null,
+      passwordHash: credentials?.hash || null,
+      createdAt: new Date().toISOString(),
+    };
+    db.users.push(user);
+    persist();
+    return user;
+  },
   getUser(id) {
     return db.users.find((u) => u.id === id) || null;
   },
+  findUserByEmail(email) {
+    if (!email) return null;
+    const e = email.toLowerCase();
+    return db.users.find((u) => (u.email || '').toLowerCase() === e) || null;
+  },
   listUsers() {
     return db.users;
+  },
+
+  // ---- sessions ---------------------------------------------------------
+  createSession({ userId, token, expiresAt }) {
+    const rec = { token, userId, createdAt: new Date().toISOString(), expiresAt };
+    db.sessions.push(rec);
+    persist();
+    return rec;
+  },
+  getSession(token) {
+    if (!token) return null;
+    const s = db.sessions.find((x) => x.token === token);
+    if (!s) return null;
+    if (new Date(s.expiresAt).getTime() < Date.now()) {
+      this.deleteSession(token);
+      return null;
+    }
+    return s;
+  },
+  deleteSession(token) {
+    const before = db.sessions.length;
+    db.sessions = db.sessions.filter((s) => s.token !== token);
+    if (db.sessions.length !== before) persist();
+  },
+
+  // ---- audit ------------------------------------------------------------
+  audit(entry) {
+    db.auditLogs.push({ id: randomUUID(), ...entry, at: new Date().toISOString() });
+    // keep the trail bounded
+    if (db.auditLogs.length > 500) db.auditLogs = db.auditLogs.slice(-500);
+    persist();
+  },
+  recentAudit(limit = 25) {
+    return db.auditLogs.slice(-limit).reverse();
   },
 
   // ---- assessment responses + profiles ---------------------------------
