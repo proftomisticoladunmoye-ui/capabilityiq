@@ -1,0 +1,32 @@
+{
+  "name": "capability-iq",
+  "version": "1.0.0",
+  "description": "Capability IQ™ — Human Capability Intelligence Platform. Measure. Develop. Predict. Amplify Human Capability.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed": "node scripts/seed.js"
+  },
+  "keywords": [
+    "human-capability",
+    "intelligence",
+    "psychometrics",
+    "assessment",
+    "hci",
+    "talent",
+    "edtech"
+  ],
+  "author": "Capability IQ",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "docx": "^9.7.1",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "pptxgenjs": "^4.0.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
