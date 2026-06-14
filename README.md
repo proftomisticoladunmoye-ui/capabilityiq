@@ -46,6 +46,7 @@ dashboard. No database or API keys are required — the platform runs fully stan
 | **Confirmatory Factor Analysis** | ✅ Live | ML fit of the 3-factor model — χ²/CFI/TLI/RMSEA/SRMR, standardised loadings, AVE, composite reliability, Fornell-Larcker discriminant validity |
 | **IRT · Rasch (Rating Scale Model)** | ✅ Live | Andrich RSM via JMLE — item difficulties, step thresholds, person abilities, infit/outfit, separation & reliability, Wright map, category curves |
 | **Reporting & Export** | ✅ Live | PDF (print) · **Word .docx · Excel .xlsx · PowerPoint .pptx** · JSON · CSV — all generated server-side |
+| **Auth, RBAC & Audit** | ✅ Live | Password accounts (scrypt), revocable session tokens, role-based access control, audit trail; OAuth seam |
 
 The 12 dimensions: **Knowledge Intelligence · Value Creation Skills · Initiative &
 Evidence Portfolio · Exposure & Perspective · Identity, Reputation & Influence ·
@@ -69,6 +70,7 @@ capability-iq/
 │  ├─ efa.js              Exploratory factor analysis (eigen, varimax, KMO, Bartlett)
 │  ├─ cfa.js              Confirmatory factor analysis (ML fit, fit indices, AVE/CR)
 │  ├─ irt.js              Rasch Rating Scale Model (JMLE, fit, Wright map, curves)
+│  ├─ auth.js             Password hashing, session tokens, RBAC policy
 │  ├─ exporters.js        Word / Excel / PowerPoint document generators
 │  ├─ reports.js          CSV / HTML(PDF) generation + portfolio analytics
 │  └─ store.js            Zero-dependency JSON persistence (repository-shaped)
@@ -123,10 +125,14 @@ grounding context so every answer is specific to the individual.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/framework` | Dimensions, levels, coach roles |
+| GET | `/api/framework` | Dimensions, levels, coach roles, roles |
 | GET | `/api/assessment` | The 60-item instrument |
-| POST | `/api/session` | Create / resume a user |
-| GET | `/api/me` | Current user + latest profile |
+| POST | `/api/auth/signup` | Create a credentialed account → session token |
+| POST | `/api/auth/login` | Authenticate → session token |
+| POST | `/api/auth/logout` | Revoke the current session token |
+| GET | `/api/auth/me` | Current user, allowed areas + latest profile |
+| POST | `/api/auth/oauth/:provider` | OAuth seam (Google/Microsoft/Apple) |
+| GET | `/api/audit` | Security audit trail *(RBAC: institutional roles)* |
 | POST | `/api/assessment/submit` | Score responses → HCI profile |
 | GET | `/api/profile` | Latest profile + HCI history |
 | POST | `/api/coach` | Ask the AI Capability Coach |
@@ -139,17 +145,32 @@ grounding context so every answer is specific to the individual.
 | GET | `/api/research/rasch/:dimensionId` | Rasch (RSM) item calibration for a dimension |
 | GET | `/api/report.{html,docx,xlsx,pptx,json,csv}` | Exports |
 
-Auth in this build is a header shim (`x-user-id`); the route contract is unchanged when
-OAuth/RBAC/MFA is layered in for production.
+Every route except `/api/framework`, `/api/assessment` and the auth endpoints requires a
+`Authorization: Bearer <token>` session token.
 
 ---
 
-## Security & compliance (production design)
+## Security & access control
 
-RBAC, MFA, OAuth (Google/Microsoft/Apple), audit logging, encryption at rest/in transit,
-GDPR data-subject controls and ISO 27001 alignment are part of the platform's security
-architecture. This reference build ships the application and data model; the auth shim is
-the single, isolated integration point.
+**Live in this build:**
+- **Password accounts** — scrypt-hashed (salt + 64-byte derived key, constant-time compare), no external crypto deps
+- **Session tokens** — opaque 256-bit random tokens, server-side and revocable (logout deletes them), 7-day TTL
+- **Role-based access control** — six roles; the Institutional dashboard, Research Analytics and audit trail are restricted to institutional/research roles. Enforced on the backend (401/403) and reflected in the UI (restricted nav hidden, routes guarded)
+- **Audit trail** — signup, login, failed login, logout, exports and access-denied events are logged with actor, action, target, IP and timestamp; viewable by institutional roles
+
+```
+Role → restricted-area access
+ individual / student   →  own dashboard, assessment, coach, portfolio, career, dev, benchmarking, reports
+ faculty / employer / government / researcher  →  the above + Institutional + audit
+ faculty / government / researcher              →  + Research Analytics
+```
+
+**OAuth (Google/Microsoft/Apple)** is wired at `/api/auth/oauth/:provider` and surfaced in
+the sign-in modal; it returns `501 oauth_not_configured` until provider `CLIENT_ID/SECRET`
+and a redirect URI are supplied — then it mints a session exactly like `/login`.
+
+**Production hardening** (not in this reference build): MFA, encryption at rest, GDPR
+data-subject tooling and ISO 27001 alignment layer onto these same isolated seams.
 
 ---
 
