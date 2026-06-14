@@ -296,9 +296,22 @@ app.get('/api/report.html', requireAuth, (req, res) => {
   res.send(profileToHTML(profile, req.user));
 });
 
-// SPA fallback.
+// Unmatched API routes return JSON 404 (never the SPA HTML shell).
+app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
+
+// SPA fallback for everything else.
 app.get('*', (_req, res) => {
   res.sendFile(join(__dirname, 'public', 'index.html'));
+});
+
+// JSON error handler — malformed bodies and unexpected failures stay machine-readable.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, _next) => {
+  if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    return res.status(400).json({ error: 'invalid JSON body' });
+  }
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'internal server error' });
 });
 
 app.listen(PORT, () => {

@@ -10,9 +10,11 @@
   const CIQ = window.CIQ;
 
   // ---- State ------------------------------------------------------------
+  const _tok = localStorage.getItem('ciq_token') || null;
   const state = {
-    token: localStorage.getItem('ciq_token') || null,
-    user: JSON.parse(localStorage.getItem('ciq_user') || 'null'),
+    token: _tok,
+    // Only trust the cached user when a token backs it; boot re-validates via /api/auth/me.
+    user: _tok ? JSON.parse(localStorage.getItem('ciq_user') || 'null') : null,
     allowed: {},
     profile: null,
     framework: null,
@@ -50,7 +52,7 @@
     }
     if (!res.ok) {
       let msg = res.statusText;
-      try { msg = (await res.json()).error || msg; } catch {}
+      try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
       const e = new Error(msg); e.status = res.status; throw e;
     }
     const ct = res.headers.get('content-type') || '';
@@ -60,6 +62,7 @@
   // Authenticated binary/blob download → triggers a file save (or print for html).
   async function download(path, { print = false } = {}) {
     const res = await fetch(path, { headers: authHeaders() });
+    if (res.status === 401) { clearSession(); navigate('landing'); toast('Your session has expired — please sign in again.'); return; }
     if (!res.ok) { toast('Export failed (' + res.status + ')'); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
