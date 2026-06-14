@@ -44,6 +44,7 @@ dashboard. No database or API keys are required — the platform runs fully stan
 | **Research Analytics (psychometrics)** | ✅ Live | Cronbach's α, McDonald's ω, item-total correlations, descriptive stats (skew/kurtosis), inter-item correlation matrix |
 | **Exploratory Factor Analysis** | ✅ Live | Jacobi eigendecomposition, Kaiser retention, varimax rotation, KMO & Bartlett's test, scree plot, factor loadings & communalities |
 | **Confirmatory Factor Analysis** | ✅ Live | ML fit of the 3-factor model — χ²/CFI/TLI/RMSEA/SRMR, standardised loadings, AVE, composite reliability, Fornell-Larcker discriminant validity |
+| **IRT · Rasch (Rating Scale Model)** | ✅ Live | Andrich RSM via JMLE — item difficulties, step thresholds, person abilities, infit/outfit, separation & reliability, Wright map, category curves |
 | **Reporting & Export** | ✅ Live | PDF (print) · **Word .docx · Excel .xlsx · PowerPoint .pptx** · JSON · CSV — all generated server-side |
 
 The 12 dimensions: **Knowledge Intelligence · Value Creation Skills · Initiative &
@@ -67,6 +68,7 @@ capability-iq/
 │  ├─ psychometrics.js    Reliability (α/ω), item analysis, correlation matrices
 │  ├─ efa.js              Exploratory factor analysis (eigen, varimax, KMO, Bartlett)
 │  ├─ cfa.js              Confirmatory factor analysis (ML fit, fit indices, AVE/CR)
+│  ├─ irt.js              Rasch Rating Scale Model (JMLE, fit, Wright map, curves)
 │  ├─ exporters.js        Word / Excel / PowerPoint document generators
 │  ├─ reports.js          CSV / HTML(PDF) generation + portfolio analytics
 │  └─ store.js            Zero-dependency JSON persistence (repository-shaped)
@@ -92,10 +94,11 @@ end-to-end. Each boundary is shaped for the production swap:
 
 - `store.js` exposes a repository interface → drop-in PostgreSQL/Prisma.
 - The Express routes are the API contract → re-host under NestJS unchanged.
-- `hci.js`, `psychometrics.js`, `efa.js` and `cfa.js` are pure functions → the Node
-  analytics engine (descriptives, Cronbach α, McDonald's ω, item-total correlations,
-  eigendecomposition, varimax EFA, ML CFA with full fit indices, KMO/Bartlett) can be
-  extended or swapped for a FastAPI/R service (IRT/Rasch, SEM) without changing the frontend.
+- `hci.js`, `psychometrics.js`, `efa.js`, `cfa.js` and `irt.js` are pure functions → the
+  Node analytics engine (descriptives, Cronbach α, McDonald's ω, item-total correlations,
+  eigendecomposition, varimax EFA, ML CFA with full fit indices, KMO/Bartlett, Rasch RSM
+  via JMLE) can be extended or swapped for a FastAPI/R service (full SEM, 2PL/GRM IRT)
+  without changing the frontend.
 - `ai-coach.js` already speaks to Anthropic/OpenAI; add a vector store for RAG.
 
 ---
@@ -133,6 +136,7 @@ grounding context so every answer is specific to the individual.
 | GET | `/api/research/correlation/:dimensionId` | Inter-item correlation matrix |
 | GET | `/api/research/efa` | Exploratory factor analysis across the 12 dimensions |
 | GET | `/api/research/cfa` | Confirmatory factor analysis of the 3-factor model + fit indices |
+| GET | `/api/research/rasch/:dimensionId` | Rasch (RSM) item calibration for a dimension |
 | GET | `/api/report.{html,docx,xlsx,pptx,json,csv}` | Exports |
 
 Auth in this build is a header shim (`x-user-id`); the route contract is unchanged when
