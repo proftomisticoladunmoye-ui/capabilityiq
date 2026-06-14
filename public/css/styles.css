@@ -319,6 +319,16 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .modal h2 { font-family: var(--font-display); color: var(--navy); font-size: 23px; margin-bottom: 4px; }
 .modal p.sub { color: var(--slate); margin-bottom: 20px; font-size: 14px; }
 
+/* auth modal */
+.auth-tabs { display: flex; gap: 6px; background: var(--bg-alt); border-radius: 11px; padding: 4px; margin-bottom: 18px; }
+.auth-tab { flex: 1; padding: 9px; border-radius: 8px; font-size: 13.5px; font-weight: 600; color: var(--slate); }
+.auth-tab.active { background: var(--white); color: var(--navy); box-shadow: var(--shadow-sm); }
+.sso-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.sso-btn { flex: 1; padding: 10px; border: 1px solid var(--line-strong); border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--ink-soft); background: var(--white); transition: border-color .15s; }
+.sso-btn:hover { border-color: var(--navy); color: var(--navy); }
+.sso-sep { display: flex; align-items: center; gap: 12px; color: var(--slate); font-size: 12px; margin-bottom: 14px; }
+.sso-sep::before, .sso-sep::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+
 /* ---- Empty state ----------------------------------------- */
 .empty { text-align: center; padding: 60px 20px; color: var(--slate); }
 .empty .ic { font-size: 46px; margin-bottom: 12px; opacity: .5; }

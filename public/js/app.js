@@ -11,7 +11,9 @@
 
   // ---- State ------------------------------------------------------------
   const state = {
+    token: localStorage.getItem('ciq_token') || null,
     user: JSON.parse(localStorage.getItem('ciq_user') || 'null'),
+    allowed: {},
     profile: null,
     framework: null,
     route: 'landing',
@@ -19,18 +21,59 @@
     coachLog: [],
   };
 
+  function setSession({ token, user, allowed }) {
+    if (token) { state.token = token; localStorage.setItem('ciq_token', token); }
+    if (user) { state.user = user; localStorage.setItem('ciq_user', JSON.stringify(user)); }
+    if (allowed) state.allowed = allowed;
+  }
+  function clearSession() {
+    state.token = null; state.user = null; state.allowed = {}; state.profile = null;
+    localStorage.removeItem('ciq_token'); localStorage.removeItem('ciq_user');
+  }
+
   // ---- API --------------------------------------------------------------
+  function authHeaders(extra = {}) {
+    const h = { ...extra };
+    if (state.token) h['authorization'] = 'Bearer ' + state.token;
+    return h;
+  }
+
   async function api(path, { method = 'GET', body } = {}) {
-    const headers = { 'content-type': 'application/json' };
-    if (state.user) headers['x-user-id'] = state.user.id;
+    const headers = authHeaders({ 'content-type': 'application/json' });
     const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    if (res.status === 401) {
+      // session expired or missing — drop to landing/login
+      clearSession();
+      if (state.route !== 'landing') navigate('landing');
+      const e = new Error('Your session has expired — please sign in again.');
+      e.status = 401; throw e;
+    }
     if (!res.ok) {
       let msg = res.statusText;
       try { msg = (await res.json()).error || msg; } catch {}
-      throw new Error(msg);
+      const e = new Error(msg); e.status = res.status; throw e;
     }
     const ct = res.headers.get('content-type') || '';
     return ct.includes('application/json') ? res.json() : res.text();
+  }
+
+  // Authenticated binary/blob download → triggers a file save (or print for html).
+  async function download(path, { print = false } = {}) {
+    const res = await fetch(path, { headers: authHeaders() });
+    if (!res.ok) { toast('Export failed (' + res.status + ')'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    if (print) {
+      const w = window.open(url, '_blank');
+      if (w) w.addEventListener('load', () => setTimeout(() => w.print(), 400));
+    } else {
+      const cd = res.headers.get('content-disposition') || '';
+      const m = cd.match(/filename="?([^"]+)"?/);
+      const a = document.createElement('a');
+      a.href = url; a.download = m ? m[1] : 'report';
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
   }
 
   // ---- Helpers ----------------------------------------------------------
@@ -69,11 +112,12 @@
   // ---- Boot -------------------------------------------------------------
   async function boot() {
     state.framework = await api('/api/framework');
-    if (state.user) {
+    if (state.token) {
       try {
-        const me = await api('/api/me');
-        state.user = me.user; state.profile = me.profile;
-      } catch { state.user = null; localStorage.removeItem('ciq_user'); }
+        const me = await api('/api/auth/me');
+        setSession({ user: me.user, allowed: me.allowed });
+        state.profile = me.profile;
+      } catch { clearSession(); }
     }
     const initial = location.hash.replace('#', '') || (state.user ? 'dashboard' : 'landing');
     navigate(initial, true);
@@ -84,7 +128,16 @@
     if (r !== state.route) navigate(r, true);
   });
 
+  // Map a route to the RBAC area it requires (if any).
+  const ROUTE_AREA = { institutional: 'institutional', research: 'research' };
+
   function navigate(route, skipHash) {
+    // RBAC: block restricted routes the user's role may not access.
+    const area = ROUTE_AREA[route];
+    if (state.user && area && state.allowed[area] === false) {
+      toast(`Your role (${state.user.role}) can’t access ${route}.`);
+      route = 'dashboard';
+    }
     state.route = route;
     if (!skipHash) location.hash = route;
     else if (location.hash.replace('#', '') !== route) history.replaceState(null, '', '#' + route);
@@ -200,48 +253,89 @@
   // ============================================================
   // AUTH
   // ============================================================
+  let authMode = 'signup'; // 'signup' | 'login'
+
   function openAuth(nextRoute = 'dashboard') {
-    modalRoot.innerHTML = `
-    <div class="modal-bg">
-      <div class="modal">
-        <div class="brand" style="margin-bottom:18px"><span class="logo">iQ</span> Capability IQ™</div>
-        <h2>Create your capability profile</h2>
-        <p class="sub">Single sign-on in the full platform (Google · Microsoft · Apple · OAuth). For this build, enter your details to begin.</p>
-        <div class="field"><label>Full name</label><input id="au-name" placeholder="Jordan Mensah" autocomplete="name" /></div>
-        <div class="field"><label>Email</label><input id="au-email" type="email" placeholder="you@org.com" autocomplete="email" /></div>
-        <div class="field"><label>I am a…</label>
-          <select id="au-role">
-            <option value="individual">Individual</option>
-            <option value="student">University student</option>
-            <option value="faculty">Faculty / educator</option>
-            <option value="employer">Employer / HR</option>
-            <option value="government">Government / policy</option>
-            <option value="researcher">Researcher</option>
-          </select>
-        </div>
-        <div class="field"><label>Organisation <span class="muted">(optional)</span></label><input id="au-org" placeholder="Stanford University" /></div>
-        <button class="btn btn-primary btn-block" id="au-go" style="margin-top:8px">Enter platform →</button>
-        <button class="btn btn-block" id="au-cancel" style="margin-top:8px;color:var(--slate)">Cancel</button>
-      </div>
-    </div>`;
     const close = () => (modalRoot.innerHTML = '');
-    $('#au-cancel').addEventListener('click', () => { close(); if (!state.user) navigate('landing'); });
-    $('#au-go').addEventListener('click', async () => {
-      const name = $('#au-name').value.trim();
-      if (!name) return toast('Please enter your name');
+    const render = () => {
+      const isSignup = authMode === 'signup';
+      modalRoot.innerHTML = `
+      <div class="modal-bg">
+        <div class="modal">
+          <div class="brand" style="margin-bottom:16px"><span class="logo">iQ</span> Capability IQ™</div>
+          <div class="auth-tabs">
+            <button class="auth-tab ${isSignup ? 'active' : ''}" data-mode="signup">Create account</button>
+            <button class="auth-tab ${!isSignup ? 'active' : ''}" data-mode="login">Sign in</button>
+          </div>
+          <h2>${isSignup ? 'Create your capability profile' : 'Welcome back'}</h2>
+          <p class="sub">${isSignup ? 'Secure your account with email and a password.' : 'Sign in to your Capability IQ account.'}</p>
+
+          <div class="sso-row">
+            ${['Google', 'Microsoft', 'Apple'].map((p) => `<button class="sso-btn" data-sso="${p.toLowerCase()}">${p}</button>`).join('')}
+          </div>
+          <div class="sso-sep"><span>or with email</span></div>
+
+          ${isSignup ? `<div class="field"><label>Full name</label><input id="au-name" placeholder="Jordan Mensah" autocomplete="name" /></div>` : ''}
+          <div class="field"><label>Email</label><input id="au-email" type="email" placeholder="you@org.com" autocomplete="email" /></div>
+          <div class="field"><label>Password</label><input id="au-pass" type="password" placeholder="${isSignup ? 'At least 8 characters' : '••••••••'}" autocomplete="${isSignup ? 'new-password' : 'current-password'}" /></div>
+          ${isSignup ? `
+          <div class="field"><label>I am a…</label>
+            <select id="au-role">
+              <option value="individual">Individual</option>
+              <option value="student">University student</option>
+              <option value="faculty">Faculty / educator</option>
+              <option value="employer">Employer / HR</option>
+              <option value="government">Government / policy</option>
+              <option value="researcher">Researcher</option>
+            </select>
+          </div>
+          <div class="field"><label>Organisation <span class="muted">(optional)</span></label><input id="au-org" placeholder="Stanford University" /></div>` : ''}
+
+          <button class="btn btn-primary btn-block" id="au-go" style="margin-top:8px">${isSignup ? 'Create account →' : 'Sign in →'}</button>
+          <button class="btn btn-block" id="au-cancel" style="margin-top:8px;color:var(--slate)">Cancel</button>
+        </div>
+      </div>`;
+
+      modalRoot.querySelectorAll('[data-mode]').forEach((b) =>
+        b.addEventListener('click', () => { authMode = b.dataset.mode; render(); }));
+      modalRoot.querySelectorAll('[data-sso]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          try { await api('/api/auth/oauth/' + b.dataset.sso, { method: 'POST' }); }
+          catch (e) { toast(e.message); }
+        }));
+      $('#au-cancel').addEventListener('click', () => { close(); if (!state.user) navigate('landing'); });
+      $('#au-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#au-go').click(); });
+      $('#au-go').addEventListener('click', submit);
+    };
+
+    async function submit() {
+      const email = $('#au-email').value.trim();
+      const password = $('#au-pass').value;
       try {
-        const { user } = await api('/api/session', { method: 'POST', body: {
-          name, email: $('#au-email').value.trim(), role: $('#au-role').value, org: $('#au-org').value.trim(),
-        }});
-        state.user = user; localStorage.setItem('ciq_user', JSON.stringify(user));
-        const me = await api('/api/me'); state.profile = me.profile;
-        close(); navigate(state.profile ? nextRoute : 'assessment');
-      } catch (e) { toast('Could not start session: ' + e.message); }
-    });
+        let resp;
+        if (authMode === 'signup') {
+          const name = $('#au-name').value.trim();
+          if (!name) return toast('Please enter your name');
+          if (password.length < 8) return toast('Password must be at least 8 characters');
+          resp = await api('/api/auth/signup', { method: 'POST', body: {
+            name, email, password, role: $('#au-role').value, org: $('#au-org').value.trim(),
+          }});
+        } else {
+          resp = await api('/api/auth/login', { method: 'POST', body: { email, password } });
+        }
+        setSession({ token: resp.token, user: resp.user, allowed: resp.allowed });
+        const me = await api('/api/auth/me'); state.profile = me.profile;
+        close();
+        navigate(state.profile ? nextRoute : 'assessment');
+      } catch (e) { toast(e.message); }
+    }
+
+    render();
   }
 
-  function logout() {
-    state.user = null; state.profile = null; localStorage.removeItem('ciq_user');
+  async function logout() {
+    try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
+    clearSession();
     navigate('landing');
   }
 
@@ -288,10 +382,12 @@
     <div class="app">
       <aside class="sidebar" id="sidebar">
         <div class="brand"><span class="logo">iQ</span> Capability IQ<span class="tm" style="color:var(--gold)">™</span></div>
-        ${NAV.map(([grp, items]) => `
-          <div class="nav-group-label">${grp}</div>
-          ${items.map(([r, ic, label]) => `<div class="nav-item ${r === route ? 'active' : ''}" data-route="${r}"><span class="ic">${ic}</span>${label}</div>`).join('')}
-        `).join('')}
+        ${NAV.map(([grp, items]) => {
+          const visible = items.filter(([r]) => { const a = ROUTE_AREA[r]; return !a || state.allowed[a] !== false; });
+          if (!visible.length) return '';
+          return `<div class="nav-group-label">${grp}</div>` +
+            visible.map(([r, ic, label]) => `<div class="nav-item ${r === route ? 'active' : ''}" data-route="${r}"><span class="ic">${ic}</span>${label}</div>`).join('');
+        }).join('')}
         <div class="spacer"></div>
         <div class="me">
           <div class="avatar">${initials}</div>
@@ -680,12 +776,29 @@
         <div class="card"><div class="card-head"><h3>Capability heat map</h3><span class="hint">cohort mean by dimension</span></div><div id="inst-heat" class="chart"></div></div>
         <div class="card"><div class="card-head"><h3>HCI distribution</h3><span class="hint">members per maturity band</span></div><div id="inst-dist" class="chart"></div></div>
       </div>
-      <div class="card"><div class="card-head"><h3>Dimension league table</h3></div>
+      <div class="card" style="margin-bottom:18px"><div class="card-head"><h3>Dimension league table</h3></div>
         <table class="tbl"><thead><tr><th>#</th><th>Dimension</th><th>Cohort mean</th><th>Status</th></tr></thead>
         <tbody>${[...d.dimMeans].sort((a, b) => b.mean - a.mean).map((m, i) => `<tr><td>${i + 1}</td><td><b>${m.name}</b></td><td class="num">${m.mean}</td><td>${m.mean >= 65 ? '<span class="up">Strong</span>' : m.mean >= 50 ? 'Developing' : '<span class="down">Gap</span>'}</td></tr>`).join('')}</tbody></table>
+      </div>
+      <div class="card"><div class="card-head"><h3>Security & audit trail</h3><span class="hint">RBAC-protected · most recent events</span></div>
+        <div id="inst-audit"><div class="muted" style="font-size:13px">Loading audit log…</div></div>
       </div>`;
     CIQ.heat($('#inst-heat'), d.dimMeans);
     CIQ.distribution($('#inst-dist'), d.distribution);
+
+    // Audit trail (same RBAC area as institutional).
+    try {
+      const a = await api('/api/audit');
+      const icon = { signup: '✛', login: '→', logout: '←', login_failed: '⚠', export: '⎙', access_denied: '⛔' };
+      $('#inst-audit').innerHTML = a.entries.length ? `<table class="tbl">
+        <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th></tr></thead>
+        <tbody>${a.entries.map((e) => `<tr>
+          <td class="muted" style="font-size:12px">${new Date(e.at).toLocaleString()}</td>
+          <td>${esc(e.actorEmail || '—')}</td>
+          <td><span class="pill">${icon[e.action] || '•'} ${e.action.replace('_', ' ')}</span></td>
+          <td class="muted">${esc(e.target || '')}</td></tr>`).join('')}</tbody></table>` :
+        '<div class="muted" style="font-size:13px">No audit events yet.</div>';
+    } catch { $('#inst-audit').innerHTML = '<div class="muted" style="font-size:13px">Audit log unavailable.</div>'; }
   };
 
   // ---- Research Analytics (psychometrics) ------------------------------
@@ -894,14 +1007,13 @@
   // ---- Reports ----------------------------------------------------------
   views.reports = function (view) {
     if (!state.profile) return needProfile(view, 'reports');
-    const uid = state.user.id;
     const exports = [
-      ['⎙', 'PDF', 'Print-ready capability intelligence report', `/api/report.html?userId=${uid}`, 'print'],
-      ['◫', 'Word .docx', 'Formatted report with dimension & gap tables', `/api/report.docx?userId=${uid}`, 'download'],
-      ['▦', 'Excel .xlsx', '5-sheet workbook: summary, dimensions, gaps, benchmarks, forecast', `/api/report.xlsx?userId=${uid}`, 'download'],
-      ['◭', 'PowerPoint .pptx', '3-slide executive deck', `/api/report.pptx?userId=${uid}`, 'download'],
-      ['◈', 'JSON', 'Complete machine-readable profile', `/api/report.json?userId=${uid}`, 'download'],
-      ['▤', 'CSV', 'Dimension scores & readiness', `/api/report.csv?userId=${uid}`, 'download'],
+      ['⎙', 'PDF', 'Print-ready capability intelligence report', '/api/report.html', 'print'],
+      ['◫', 'Word .docx', 'Formatted report with dimension & gap tables', '/api/report.docx', 'download'],
+      ['▦', 'Excel .xlsx', '5-sheet workbook: summary, dimensions, gaps, benchmarks, forecast', '/api/report.xlsx', 'download'],
+      ['◭', 'PowerPoint .pptx', '3-slide executive deck', '/api/report.pptx', 'download'],
+      ['◈', 'JSON', 'Complete machine-readable profile', '/api/report.json', 'download'],
+      ['▤', 'CSV', 'Dimension scores & readiness', '/api/report.csv', 'download'],
     ];
     view.innerHTML = `
       <div class="grid g-3" style="margin-bottom:18px">
@@ -916,14 +1028,8 @@
         <div class="card-head"><h3>All exports are live</h3></div>
         <p class="muted" style="font-size:13.5px">PDF, Word, Excel, PowerPoint, JSON and CSV are generated server-side from the same capability profile that powers your dashboard — so a report never diverges from what you see on screen. PNG/SVG chart exports are available directly from each ECharts visual.</p>
       </div>`;
-    view.querySelectorAll('[data-url]').forEach((b) => b.addEventListener('click', () => {
-      if (b.dataset.mode === 'print') {
-        const w = window.open(b.dataset.url, '_blank');
-        if (w) w.addEventListener('load', () => setTimeout(() => w.print(), 400));
-      } else {
-        window.open(b.dataset.url, '_blank');
-      }
-    }));
+    view.querySelectorAll('[data-url]').forEach((b) => b.addEventListener('click', () =>
+      download(b.dataset.url, { print: b.dataset.mode === 'print' })));
   };
 
   // ---- Go ---------------------------------------------------------------
