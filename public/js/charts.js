@@ -257,6 +257,61 @@ CIQ.loadingsHeat = function (el, loadings, nFactors) {
   });
 };
 
+// ---- Wright person-item map (Rasch) -----------------------------------
+CIQ.wrightMap = function (el, wright) {
+  const bins = wright.bins;
+  const labels = bins.map((b) => b.logit);
+  // bin the item difficulties onto the same logit bins
+  const itemCounts = new Array(bins.length).fill(0);
+  const itemLabels = bins.map(() => []);
+  const lo = labels[0], step = labels.length > 1 ? labels[1] - labels[0] : 1;
+  wright.items.forEach((it) => {
+    let b = Math.round((it.difficulty - lo) / step);
+    b = Math.max(0, Math.min(bins.length - 1, b));
+    itemCounts[b]++; itemLabels[b].push(it.label);
+  });
+  const maxP = Math.max(1, ...bins.map((b) => b.count));
+  return mount(el, {
+    textStyle: { fontFamily: FONT },
+    grid: { left: 60, right: 60, top: 28, bottom: 28 },
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: (ps) => {
+        const i = ps[0].dataIndex;
+        return `Logit ${labels[i]}<br/>Persons: <b>${bins[i].count}</b><br/>Items: <b>${itemLabels[i].join(', ') || '—'}</b>`;
+      },
+    },
+    legend: { data: ['Persons', 'Items'], top: 0, textStyle: { color: C.slate, fontSize: 11 } },
+    xAxis: { type: 'value', axisLabel: { formatter: (v) => Math.abs(v), color: C.slate, fontSize: 10 }, splitLine: { lineStyle: { color: C.line } }, min: -maxP, max: maxP },
+    yAxis: { type: 'category', data: labels, name: 'logit', nameTextStyle: { color: C.slate }, axisLabel: { color: C.slate, fontSize: 9, interval: 1 }, axisLine: { lineStyle: { color: C.line } } },
+    series: [
+      { name: 'Persons', type: 'bar', stack: 'x', data: bins.map((b) => -b.count), itemStyle: { color: C.slate, opacity: 0.65 }, barWidth: '80%' },
+      { name: 'Items', type: 'bar', stack: 'x', data: itemCounts, itemStyle: { color: C.gold }, barWidth: '80%',
+        label: { show: true, position: 'right', color: C.navy, fontSize: 10, formatter: (p) => itemLabels[p.dataIndex].join(' ') } },
+    ],
+  });
+};
+
+// ---- Category probability curves (Rasch RSM) --------------------------
+CIQ.categoryCurves = function (el, curves) {
+  const palette = ['#9AA5B1', '#5C677D', '#2D6A9F', '#0B2545', '#7a5b12', '#B8860B', '#cf9a1e'];
+  return mount(el, {
+    textStyle: { fontFamily: FONT },
+    grid: { left: 40, right: 46, top: 24, bottom: 30 },
+    tooltip: { trigger: 'axis' },
+    legend: { data: curves.categories.map((_, k) => 'Cat ' + k).concat(['E(score)']), top: 0, textStyle: { color: C.slate, fontSize: 10 }, itemWidth: 14 },
+    xAxis: { type: 'category', data: curves.theta, name: 'Ability θ (logit)', nameLocation: 'middle', nameGap: 24, nameTextStyle: { color: C.slate, fontSize: 11 }, axisLabel: { color: C.slate, fontSize: 9, interval: 7 }, axisLine: { lineStyle: { color: C.line } } },
+    yAxis: [
+      { type: 'value', name: 'P(category)', min: 0, max: 1, splitLine: { lineStyle: { color: C.line } }, axisLabel: { color: C.slate } },
+      { type: 'value', name: 'E(score)', min: 0, max: 6, position: 'right', splitLine: { show: false }, axisLabel: { color: C.slate } },
+    ],
+    series: [
+      ...curves.categories.map((data, k) => ({ name: 'Cat ' + k, type: 'line', data, smooth: true, symbol: 'none', lineStyle: { color: palette[k], width: 2 } })),
+      { name: 'E(score)', type: 'line', yAxisIndex: 1, data: curves.expected, smooth: true, symbol: 'none', lineStyle: { color: C.gold, width: 2.5, type: 'dashed' } },
+    ],
+  });
+};
+
 // ---- Mini hero orb (landing) ------------------------------------------
 CIQ.heroOrb = function (el) {
   const dims = ['Knowledge', 'Value', 'Initiative', 'Exposure', 'Reputation', 'Cognition', 'Collab', 'Agility', 'Digital', 'AI', 'Venture', 'Resilience'];

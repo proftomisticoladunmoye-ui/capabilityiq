@@ -729,10 +729,12 @@
         <div id="ra-corr" class="chart sm"></div>
       </div>
       <div id="ra-efa" style="margin-top:18px"></div>
-      <div id="ra-cfa" style="margin-top:18px"></div>`;
+      <div id="ra-cfa" style="margin-top:18px"></div>
+      <div id="ra-rasch" style="margin-top:18px"></div>`;
 
     renderEFA($('#ra-efa'));
     renderCFA($('#ra-cfa'));
+    renderRasch($('#ra-rasch'), d.dimensions[0].id);
     const byId = Object.fromEntries(d.dimensions.map((x) => [x.id, x]));
     async function showDim(id) {
       const dim = byId[id];
@@ -841,6 +843,51 @@
           </div>
           <p class="muted" style="font-size:12px;margin-top:12px">Estimation: ML discrepancy minimisation on the correlation structure, congeneric (PCA-per-block) start values refined by coordinate descent. Convergent validity is strong (all AVE &gt; .50, CR &gt; .70).</p>
         </div>`;
+    }
+
+    async function renderRasch(host, dimId) {
+      host.innerHTML = '<div class="card"><div class="empty" style="padding:30px">Calibrating Rasch rating-scale model (JMLE)…</div></div>';
+      const r = await api('/api/research/rasch/' + dimId);
+      const dimOptions = d.dimensions.map((x) => `<option value="${x.id}" ${x.id === dimId ? 'selected' : ''}>${x.name}</option>`).join('');
+      if (r.empty) {
+        host.innerHTML = `<div class="card"><div class="card-head"><h3>Item Response Theory · Rasch</h3>
+          <select id="rasch-dim" style="margin-left:auto;border:1px solid var(--line-strong);border-radius:8px;padding:6px 10px;font-family:inherit">${dimOptions}</select></div>
+          <p class="muted">${r.reason || 'Insufficient data for calibration.'}</p></div>`;
+        $('#rasch-dim').addEventListener('change', (e) => renderRasch(host, e.target.value));
+        return;
+      }
+      const rel = r.reliability;
+      const fitColor = (v) => (v == null ? 'var(--slate)' : v > 1.5 || v < 0.5 ? '#b5462f' : 'var(--lvl-elite)');
+      host.innerHTML = `
+        <div class="card">
+          <div class="card-head"><h3>Item Response Theory · Andrich Rating Scale Model</h3>
+            <select id="rasch-dim" style="margin-left:auto;border:1px solid var(--line-strong);border-radius:8px;padding:6px 10px;font-family:inherit">${dimOptions}</select>
+          </div>
+          <div class="grid g-4" style="margin-bottom:16px">
+            <div class="stat"><div class="l">Calibrated N</div><div class="v">${r.estimableN}</div><div class="d muted">${r.extremePersons} extreme excluded</div></div>
+            <div class="stat"><div class="l">Person reliability</div><div class="v" style="color:${rel.personReliability >= 0.8 ? 'var(--lvl-elite)' : 'var(--lvl-developing)'}">${rel.personReliability}</div><div class="d muted">separation ${rel.personSeparation}</div></div>
+            <div class="stat"><div class="l">Item reliability</div><div class="v">${rel.itemReliability}</div><div class="d muted">separation ${rel.itemSeparation}</div></div>
+            <div class="stat"><div class="l">Thresholds</div><div class="v" style="color:${r.thresholdsOrdered ? 'var(--lvl-elite)' : '#b5462f'}">${r.thresholdsOrdered ? 'Ordered' : 'Disordered'}</div><div class="d muted">${r.iterations} JMLE iters</div></div>
+          </div>
+          <div class="grid g-2">
+            <div><div class="card-head"><h3 style="font-size:14px">Person–item (Wright) map</h3><span class="hint">shared logit scale</span></div><div id="rasch-wright" class="chart"></div></div>
+            <div><div class="card-head"><h3 style="font-size:14px">Category probability curves</h3><span class="hint">rating-scale structure</span></div><div id="rasch-curves" class="chart"></div></div>
+          </div>
+          <div class="card-head" style="margin-top:14px"><h3 style="font-size:14px">Item calibration & fit</h3></div>
+          <table class="tbl">
+            <thead><tr><th>Item</th><th>Measure (logit)</th><th>SE</th><th>Infit MNSQ</th><th>Outfit MNSQ</th><th>Fit</th></tr></thead>
+            <tbody>${r.items.map((it) => `<tr>
+              <td title="${esc(it.text)}"><b>${it.label}</b> <span class="muted" style="font-size:12px">${esc(it.text.slice(0, 54))}${it.text.length > 54 ? '…' : ''}</span></td>
+              <td class="num">${it.difficulty}</td><td class="num">${it.se}</td>
+              <td class="num" style="color:${fitColor(it.infit)}">${it.infit}</td>
+              <td class="num" style="color:${fitColor(it.outfit)}">${it.outfit}</td>
+              <td><span class="pill">${it.fitFlag}</span></td></tr>`).join('')}</tbody>
+          </table>
+          <p class="muted" style="font-size:12px;margin-top:12px">Step thresholds: ${r.thresholds.map((t) => `τ${t.step}=${t.value}`).join(', ')}. Infit/Outfit in [0.5, 1.5] = productive for measurement. Persons and items share one logit scale (JMLE), so ability and difficulty are directly comparable.</p>
+        </div>`;
+      $('#rasch-dim').addEventListener('change', (e) => renderRasch(host, e.target.value));
+      CIQ.wrightMap($('#rasch-wright'), r.wright);
+      CIQ.categoryCurves($('#rasch-curves'), r.curves);
     }
   };
 
