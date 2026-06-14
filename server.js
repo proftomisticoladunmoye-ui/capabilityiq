@@ -15,6 +15,7 @@ import { profileToCSV, profileToHTML, portfolioAnalytics } from './src/reports.j
 import { analyseCohort, correlationMatrix } from './src/psychometrics.js';
 import { runEFA } from './src/efa.js';
 import { runCFA } from './src/cfa.js';
+import { calibrateDimension } from './src/irt.js';
 import { buildDocx, buildXlsx, buildPptx } from './src/exporters.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -168,6 +169,12 @@ app.get('/api/research/cfa', (_req, res) => {
   const records = store.raw().responses;
   if (!records.length) return res.json({ empty: true, reason: 'no responses' });
   res.json(runCFA(records));
+});
+
+app.get('/api/research/rasch/:dimensionId', (req, res) => {
+  const records = store.raw().responses;
+  if (!records.length) return res.json({ empty: true, reason: 'no responses' });
+  res.json(calibrateDimension(records, req.params.dimensionId));
 });
 
 // ---- exports ------------------------------------------------------------
