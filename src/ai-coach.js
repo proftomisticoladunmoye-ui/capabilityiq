@@ -141,17 +141,48 @@ async function llmAnswer(message, role, profile) {
     return { role: roleLabel, answer: data.choices?.[0]?.message?.content || '', followups: [] };
   }
 
+  // OpenRouter (OpenAI-compatible gateway → access to frontier models).
+  if (process.env.OPENROUTER_API_KEY) {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost:3000',
+        'X-Title': 'Capability IQ',
+      },
+      body: JSON.stringify({
+        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-opus-4.8',
+        max_tokens: 900,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: message },
+        ],
+      }),
+    });
+    if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    const data = await res.json();
+    return { role: roleLabel, answer: data.choices?.[0]?.message?.content || '', followups: [] };
+  }
+
   throw new Error('no-llm');
+}
+
+function hasLLM() {
+  return Boolean(
+    process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY
+  );
 }
 
 export async function coach({ message, role = 'capability', profile }) {
   try {
-    if (process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY) {
+    if (hasLLM()) {
       const out = await llmAnswer(message, role, profile);
-      return { ...out, source: 'llm' };
+      // an empty completion shouldn't beat the deterministic engine
+      if (out.answer && out.answer.trim()) return { ...out, source: 'llm' };
     }
-  } catch {
-    // fall through to deterministic engine
+  } catch (e) {
+    if (process.env.CIQ_DEBUG) console.error('LLM coach failed, falling back:', e.message);
   }
   return { ...fallbackAnswer(message, role, profile), source: 'engine' };
 }
