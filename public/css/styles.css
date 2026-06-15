@@ -296,6 +296,11 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .msg .bubble h2, .msg .bubble h3 { font-size: 15px; margin: 8px 0 4px; color: var(--navy); }
 .msg .bubble strong { color: var(--navy); }
 .msg .bubble ul { margin: 6px 0 6px 18px; }
+.msg .bubble code { background: var(--bg-alt); padding: 1px 5px; border-radius: 5px; font-size: 12.5px; font-family: ui-monospace, 'Cascadia Code', monospace; }
+.msg .bubble .chat-tbl { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
+.msg .bubble .chat-tbl th { background: var(--navy); color: #fff; text-align: left; padding: 6px 9px; font-weight: 600; }
+.msg .bubble .chat-tbl td { padding: 6px 9px; border-bottom: 1px solid var(--line); }
+.msg .bubble .chat-tbl tr:nth-child(even) td { background: var(--bg); }
 .msg .who { font-size: 11px; color: var(--slate); margin-bottom: 4px; font-weight: 600; }
 .followups { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .followups button { font-size: 12.5px; padding: 6px 12px; border-radius: 999px; background: var(--gold-100); color: var(--gold); font-weight: 600; }
@@ -314,8 +319,11 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 3px rgba(11,37,69,.08); }
 
 /* ---- Modal ----------------------------------------------- */
-.modal-bg { position: fixed; inset: 0; background: rgba(11,37,69,.5); backdrop-filter: blur(4px); display: grid; place-items: center; z-index: 100; padding: 20px; }
-.modal { background: var(--white); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); width: 100%; max-width: 440px; padding: 30px; }
+/* flex + margin:auto centres the modal when it fits and lets it scroll (top reachable)
+   when it is taller than the viewport — robust on short/landscape mobile screens. */
+.modal-bg { position: fixed; inset: 0; background: rgba(11,37,69,.5); backdrop-filter: blur(4px); display: flex; overflow-y: auto; z-index: 100; padding: 20px; }
+.modal { background: var(--white); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); width: 100%; max-width: 440px; padding: 30px; margin: auto; }
+@media (max-width: 420px) { .modal { padding: 22px 20px; } }
 .modal h2 { font-family: var(--font-display); color: var(--navy); font-size: 23px; margin-bottom: 4px; }
 .modal p.sub { color: var(--slate); margin-bottom: 20px; font-size: 14px; }
 

@@ -87,19 +87,40 @@
     t.textContent = msg; t.classList.add('show');
     clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2600);
   }
-  // Minimal markdown → HTML for coach replies.
+  // Minimal markdown → HTML for coach replies (headings, lists, GFM tables, emphasis).
   function md(src) {
     const lines = esc(src).split('\n');
     let html = '', inList = false;
-    const inline = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>');
-    for (let ln of lines) {
+    const inline = (s) =>
+      s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+       .replace(/`(.+?)`/g, '<code>$1</code>')
+       .replace(/(^|[^*])\*([^*]+?)\*/g, '$1<em>$2</em>');
+    const splitRow = (ln) => ln.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim());
+    const isSep = (ln) => /^\s*\|?[\s:|-]*-{1,}[\s:|-]*\|?\s*$/.test(ln) && ln.includes('-');
+    const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i];
+      // GFM table: a header row followed by a |---|---| separator.
+      if (/^\s*\|.*\|\s*$/.test(ln) && i + 1 < lines.length && isSep(lines[i + 1])) {
+        closeList();
+        const head = splitRow(ln);
+        const body = [];
+        i += 2;
+        while (i < lines.length && /\|/.test(lines[i]) && lines[i].trim() !== '') { body.push(splitRow(lines[i])); i++; }
+        i--;
+        html += '<table class="chat-tbl"><thead><tr>' + head.map((c) => `<th>${inline(c)}</th>`).join('') + '</tr></thead><tbody>' +
+          body.map((r) => '<tr>' + r.map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>').join('') + '</tbody></table>';
+        continue;
+      }
       if (/^\s*[-*]\s+/.test(ln)) {
         if (!inList) { html += '<ul>'; inList = true; }
         html += `<li>${inline(ln.replace(/^\s*[-*]\s+/, ''))}</li>`;
       } else {
-        if (inList) { html += '</ul>'; inList = false; }
+        closeList();
         if (/^###\s/.test(ln)) html += `<h3>${inline(ln.slice(4))}</h3>`;
         else if (/^##\s/.test(ln)) html += `<h2>${inline(ln.slice(3))}</h2>`;
+        else if (/^#\s/.test(ln)) html += `<h2>${inline(ln.slice(2))}</h2>`;
         else if (ln.trim() === '') html += '<div style="height:6px"></div>';
         else html += `<p>${inline(ln)}</p>`;
       }
@@ -760,6 +781,88 @@
     CIQ.radar($('#bm-radar'), p.dimensions, { benchmark: 62 });
   };
 
+  // Role-specific institutional dashboards (Module 8). Each institutional category
+  // sees KPIs and an insight card framed for its mandate, over the same cohort data.
+  function institutionDashboard(d) {
+    const yn = (b) => (b ? 'up' : 'down');
+    const configs = {
+      faculty: {
+        name: 'University Intelligence', sub: 'Graduate readiness, employability and program effectiveness',
+        kpis: [
+          ['Graduate readiness', d.avgCareer, 'career composite /100'],
+          ['Graduate employability', d.pctAdvancedPlus + '%', 'Advanced+ on HCI'],
+          ['AI readiness', d.avgAI, 'cohort mean /100'],
+          ['Research readiness', d.avgResearch, 'cohort mean /100'],
+        ],
+        insight: {
+          title: 'Graduate outcomes outlook',
+          rows: [
+            ['Employability (Advanced+)', d.pctAdvancedPlus + '%', d.pctAdvancedPlus >= 50],
+            ['At-risk graduates', d.pctAtRisk + '%', d.pctAtRisk <= 25],
+            ['Strongest program area', d.topDimensions[0]?.short, true],
+            ['Priority for curriculum', d.bottomDimensions[0]?.short, false],
+          ],
+        },
+      },
+      employer: {
+        name: 'Employer Intelligence', sub: 'Workforce capability, leadership pipeline and succession',
+        kpis: [
+          ['Workforce HCI', d.avgHCI, 'cohort mean /100'],
+          ['Leadership pipeline', d.avgLeadership, 'leadership readiness /100'],
+          ['Succession-ready', d.pctElite + '%', 'Elite-tier talent'],
+          ['Capability at risk', d.pctAtRisk + '%', 'below Developing'],
+        ],
+        insight: {
+          title: 'Pipeline & capability gaps',
+          rows: [
+            ['Succession bench (Elite)', d.pctElite + '%', d.pctElite >= 15],
+            ['Leadership readiness', d.avgLeadership, d.avgLeadership >= 60],
+            ['Top capability gap', d.bottomDimensions[0]?.short, false],
+            ['Workforce strength', d.topDimensions[0]?.short, true],
+          ],
+        },
+      },
+      government: {
+        name: 'Government Intelligence', sub: 'National human-capital trends and workforce futures',
+        kpis: [
+          ['Human Capital Index', d.avgHCI, 'national mean /100'],
+          ['Future workforce (AI)', d.avgAI, 'AI readiness /100'],
+          ['Entrepreneurial capacity', d.avgEntrepreneurship, 'mean /100'],
+          ['Capability disparity', d.hciSD, 'HCI std. dev (lower=fairer)'],
+        ],
+        insight: {
+          title: 'Equity & workforce-futures snapshot',
+          rows: [
+            ['Population at risk', d.pctAtRisk + '%', d.pctAtRisk <= 25],
+            ['Capability disparity (SD)', d.hciSD, d.hciSD <= 15],
+            ['Future-ready (Advanced+)', d.pctAdvancedPlus + '%', d.pctAdvancedPlus >= 50],
+            ['National priority area', d.bottomDimensions[0]?.short, false],
+          ],
+        },
+      },
+      researcher: {
+        name: 'Research Organisation Intelligence', sub: 'Cohort measurement and sample characteristics',
+        kpis: [
+          ['Cohort HCI', d.avgHCI, 'mean /100'],
+          ['Sample size', d.cohortSize, 'complete profiles'],
+          ['Mean growth potential', d.avgGrowth, 'headroom score'],
+          ['Advanced+ share', d.pctAdvancedPlus + '%', 'of cohort'],
+        ],
+        insight: {
+          title: 'Sample snapshot',
+          rows: [
+            ['Dispersion (HCI SD)', d.hciSD, true],
+            ['Strongest construct', d.topDimensions[0]?.short, true],
+            ['Weakest construct', d.bottomDimensions[0]?.short, false],
+            ['Deep-dive', 'See Research Analytics', true],
+          ],
+        },
+      },
+    };
+    const cfg = configs[d.role] || configs.researcher;
+    return { cfg, yn };
+  }
+
   // ---- Institutional ----------------------------------------------------
   views.institutional = async function (view) {
     view.innerHTML = '<div class="empty">Aggregating cohort intelligence…</div>';
@@ -768,17 +871,27 @@
       view.innerHTML = `<div class="empty"><div class="ic">❖</div><h3>No cohort data yet</h3><p>Institutional dashboards aggregate the capability profiles of your members.<br/>Complete assessments to populate this view.</p></div>`;
       return;
     }
+    const { cfg } = institutionDashboard(d);
     view.innerHTML = `
+      <div class="card" style="margin-bottom:18px;background:linear-gradient(135deg,var(--navy),var(--navy-600));color:#fff;border:none">
+        <div class="spread">
+          <div><div style="font-size:12px;color:var(--gold-600);text-transform:uppercase;letter-spacing:.06em;font-weight:700">${esc(d.org)} · ${esc(d.role)}</div>
+          <h2 style="font-family:var(--font-display);font-size:22px;margin-top:4px">${cfg.name}</h2>
+          <div style="color:#c5cfdf;font-size:13.5px">${cfg.sub}</div></div>
+          <div style="text-align:right"><div style="font-size:11px;color:#aebbd0;text-transform:uppercase">Cohort</div><div style="font-family:var(--font-display);font-size:30px;font-weight:700">${d.cohortSize}</div></div>
+        </div>
+      </div>
       <div class="grid g-4" style="margin-bottom:18px">
-        <div class="stat"><div class="l">Cohort size</div><div class="v">${d.cohortSize}</div></div>
-        <div class="stat"><div class="l">Average HCI</div><div class="v">${d.avgHCI}</div></div>
-        <div class="stat"><div class="l">Avg career readiness</div><div class="v">${d.avgCareer}</div></div>
-        <div class="stat"><div class="l">Avg AI readiness</div><div class="v">${d.avgAI}</div></div>
+        ${cfg.kpis.map((k) => `<div class="stat"><div class="l">${k[0]}</div><div class="v">${k[1]}</div><div class="d muted">${k[2]}</div></div>`).join('')}
       </div>
       <div class="grid g-2" style="margin-bottom:18px">
-        <div class="card"><div class="card-head"><h3>Capability heat map</h3><span class="hint">cohort mean by dimension</span></div><div id="inst-heat" class="chart"></div></div>
+        <div class="card">
+          <div class="card-head"><h3>${cfg.insight.title}</h3></div>
+          ${cfg.insight.rows.map((r) => `<div class="spread" style="padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">${r[0]}</span><b style="color:${r[2] ? 'var(--lvl-elite)' : '#b5462f'}">${r[1] ?? '—'}</b></div>`).join('')}
+        </div>
         <div class="card"><div class="card-head"><h3>HCI distribution</h3><span class="hint">members per maturity band</span></div><div id="inst-dist" class="chart"></div></div>
       </div>
+      <div class="card" style="margin-bottom:18px"><div class="card-head"><h3>Capability heat map</h3><span class="hint">cohort mean by dimension</span></div><div id="inst-heat" class="chart"></div></div>
       <div class="card" style="margin-bottom:18px"><div class="card-head"><h3>Dimension league table</h3></div>
         <table class="tbl"><thead><tr><th>#</th><th>Dimension</th><th>Cohort mean</th><th>Status</th></tr></thead>
         <tbody>${[...d.dimMeans].sort((a, b) => b.mean - a.mean).map((m, i) => `<tr><td>${i + 1}</td><td><b>${m.name}</b></td><td class="num">${m.mean}</td><td>${m.mean >= 65 ? '<span class="up">Strong</span>' : m.mean >= 50 ? 'Developing' : '<span class="down">Gap</span>'}</td></tr>`).join('')}</tbody></table>

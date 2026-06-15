@@ -174,24 +174,39 @@ app.delete('/api/portfolio/:id', requireAuth, (req, res) => {
 app.get('/api/institutional', requireArea('institutional'), (req, res) => {
   const profiles = store.allProfiles();
   const n = profiles.length;
-  const mean = (sel) =>
-    n ? Math.round((profiles.reduce((a, p) => a + (sel(p) || 0), 0) / n) * 10) / 10 : 0;
+  const r1 = (x) => Math.round(x * 10) / 10;
+  const mean = (sel) => (n ? r1(profiles.reduce((a, p) => a + (sel(p) || 0), 0) / n) : 0);
+  const pct = (pred) => (n ? Math.round((profiles.filter(pred).length / n) * 100) : 0);
+
   const dimMeans = DIMENSIONS.map((d) => ({
     id: d.id, short: d.short, name: d.name,
-    mean: n ? Math.round((profiles.reduce((a, p) => a + (p.perDimension?.[d.id] || 0), 0) / n) * 10) / 10 : 0,
+    mean: n ? r1(profiles.reduce((a, p) => a + (p.perDimension?.[d.id] || 0), 0) / n) : 0,
   }));
   const distribution = LEVELS.map((l) => ({
     label: l.label,
     count: profiles.filter((p) => p.hci >= l.min && p.hci <= l.max).length,
   }));
+  const avgHCI = mean((p) => p.hci);
+  const sorted = [...dimMeans].sort((a, b) => b.mean - a.mean);
+
   res.json({
     cohortSize: n,
-    avgHCI: mean((p) => p.hci),
+    role: req.user.role,
+    org: req.user.org || 'All cohorts',
+    avgHCI,
+    hciSD: n ? r1(Math.sqrt(profiles.reduce((a, p) => a + (p.hci - avgHCI) ** 2, 0) / n)) : 0,
     avgCareer: mean((p) => p.readiness?.career),
     avgAI: mean((p) => p.readiness?.ai),
     avgLeadership: mean((p) => p.readiness?.leadership),
+    avgResearch: mean((p) => p.readiness?.research),
+    avgEntrepreneurship: mean((p) => p.readiness?.entrepreneurship),
+    avgGrowth: mean((p) => p.growth?.score),
+    pctElite: pct((p) => p.hci >= 81),
+    pctAdvancedPlus: pct((p) => p.hci >= 61),
+    pctAtRisk: pct((p) => p.hci < 41),
+    topDimensions: sorted.slice(0, 3),
+    bottomDimensions: sorted.slice(-3).reverse(),
     dimMeans, distribution,
-    org: req.user.org || 'All cohorts',
   });
 });
 
@@ -315,10 +330,16 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(PORT, () => {
-  const ai =
-    process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY
-      ? 'LLM-connected'
-      : 'deterministic engine';
+  const llmKey =
+    process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
+  const provider = process.env.ANTHROPIC_API_KEY
+    ? 'Anthropic'
+    : process.env.OPENAI_API_KEY
+      ? 'OpenAI'
+      : process.env.OPENROUTER_API_KEY
+        ? `OpenRouter (${process.env.OPENROUTER_MODEL || 'anthropic/claude-opus-4.8'})`
+        : null;
+  const ai = llmKey ? `LLM-connected · ${provider}` : 'deterministic engine';
   console.log(`\n  Capability IQ™  ·  http://localhost:${PORT}`);
   console.log(`  AI Coach: ${ai}  ·  Auth: password + RBAC\n`);
 });
