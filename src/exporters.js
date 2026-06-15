@@ -106,11 +106,14 @@ export async function buildXlsx(profile, user) {
   // Summary sheet
   const s = wb.addWorksheet('Summary');
   s.columns = [{ width: 30 }, { width: 18 }, { width: 18 }];
-  s.addRow(['Capability IQ™ — Capability Report']).font = { bold: true, size: 14, color: { argb: 'FF0B2545' } };
+  s.addRow(['Capability IQ™ — Human Capability Intelligence Report']).font = { bold: true, size: 14, color: { argb: 'FF0B2545' } };
+  s.addRow(['Measure. Develop. Predict. Amplify Human Capability.']).font = { italic: true, size: 10, color: { argb: 'FFB8860B' } };
   s.addRow([user?.name || 'Individual', user?.role || 'individual']);
   s.addRow([]);
   head(s, ['Metric', 'Value', 'Level']);
-  s.addRow(['Human Capability Index', profile.hci, profile.level.label]);
+  const hciRow = s.addRow(['Human Capability Index', profile.hci, profile.level.label]);
+  hciRow.getCell(2).font = { bold: true, size: 13, color: { argb: 'FFB8860B' } }; // gold accent
+  hciRow.getCell(1).font = { bold: true };
   s.addRow(['Career readiness', profile.readiness.career]);
   s.addRow(['AI readiness', profile.readiness.ai]);
   s.addRow(['Leadership readiness', profile.readiness.leadership]);
@@ -158,7 +161,10 @@ export async function buildPptx(profile, user) {
   // Slide 1 — title
   let sl = pptx.addSlide();
   sl.background = { color: navy };
-  sl.addText('Capability IQ™', { x: 0.7, y: 0.7, fontSize: 14, color: gold, bold: true, charSpacing: 2 });
+  // brand badge: gold "iQ" on a rounded navy tile
+  sl.addShape(pptx.ShapeType.roundRect, { x: 0.7, y: 0.6, w: 0.55, h: 0.55, fill: { color: '13325c' }, line: { color: gold, width: 1 }, rectRadius: 0.1 });
+  sl.addText('iQ', { x: 0.7, y: 0.6, w: 0.55, h: 0.55, align: 'center', valign: 'middle', fontSize: 22, color: gold, bold: true, fontFace: 'Poppins' });
+  sl.addText('Capability IQ™', { x: 1.35, y: 0.7, fontSize: 14, color: gold, bold: true, charSpacing: 2 });
   sl.addText(user?.name || 'Capability Intelligence Report', { x: 0.7, y: 2.4, fontSize: 44, color: 'FFFFFF', bold: true, fontFace: 'Poppins' });
   sl.addText('Measure. Develop. Predict. Amplify Human Capability.', { x: 0.7, y: 3.6, fontSize: 18, color: 'AEBBD0' });
   sl.addText(`HCI ${profile.hci} / 100`, { x: 0.7, y: 4.6, fontSize: 40, color: gold, bold: true });

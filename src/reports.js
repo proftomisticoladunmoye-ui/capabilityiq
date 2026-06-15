@@ -68,10 +68,25 @@ export function profileToHTML(profile, user) {
   .pill .l { font-size:11px; color:#5C677D; text-transform:uppercase; }
   .pill .v { font-size:22px; font-weight:700; color:#0B2545; }
   footer { margin-top:30px; color:#5C677D; font-size:11px; font-family:'Inter',sans-serif; border-top:1px solid #e6e9ef; padding-top:10px; }
+  .logo-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .logo { border-radius:9px; flex:none; }
+  @media screen and (max-width:600px) {
+    body { padding:16px; }
+    .hero { flex-direction:column; align-items:flex-start; gap:12px; }
+    .score { text-align:left; }
+    .pillars { flex-wrap:wrap; }
+    .pill { min-width:30%; }
+  }
 </style></head><body>
 <div class="hero">
-  <div>
-    <div class="tag">Capability IQ™ · Human Capability Intelligence Report</div>
+  <div class="brandcol">
+    <div class="logo-row">
+      <svg class="logo" width="38" height="38" viewBox="0 0 100 100" aria-label="Capability IQ logo">
+        <rect width="100" height="100" rx="22" fill="#0B2545"/>
+        <text x="50" y="68" font-size="52" text-anchor="middle" fill="#B8860B" font-family="Inter, Arial, sans-serif" font-weight="800">iQ</text>
+      </svg>
+      <div class="tag">Capability IQ™ · Human Capability Intelligence Report</div>
+    </div>
     <h1>${user?.name || 'Individual Capability Profile'}</h1>
     <div class="meta">${user?.role || 'individual'} · Generated ${new Date(profile.generatedAt).toLocaleDateString()} · ${profile.completion}% complete</div>
   </div>
