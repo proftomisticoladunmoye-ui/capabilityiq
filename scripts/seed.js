@@ -2,7 +2,7 @@
 // something to aggregate on first run. Generates N users each with a randomised
 // but plausible response set, scored through the real engine.
 
-import { store } from '../src/store.js';
+import { store, initStore } from '../src/store.js';
 import { buildAssessment, scoreResponses } from '../src/assessment.js';
 import { buildProfile } from '../src/hci.js';
 
@@ -50,16 +50,21 @@ function randomResponses() {
   return responses;
 }
 
-store.reset();
-for (let i = 0; i < N; i++) {
-  const name = `${pick(FIRST)} ${pick(LAST)}`;
-  const user = store.upsertUser({ name, email: `user${i}@demo.edu`, role: 'student', org: ORG });
-  const responses = randomResponses();
-  const scored = scoreResponses(responses);
-  store.saveResponses(user.id, responses);
-  store.saveProfile(user.id, buildProfile(scored));
+async function main() {
+  await initStore();
+  await store.reset();
+  for (let i = 0; i < N; i++) {
+    const name = `${pick(FIRST)} ${pick(LAST)}`;
+    const user = await store.upsertUser({ name, email: `user${i}@demo.edu`, role: 'student', org: ORG });
+    const responses = randomResponses();
+    const scored = scoreResponses(responses);
+    await store.saveResponses(user.id, responses);
+    await store.saveProfile(user.id, buildProfile(scored));
+  }
+  const profiles = await store.allProfiles();
+  const avg = Math.round((profiles.reduce((a, p) => a + p.hci, 0) / profiles.length) * 10) / 10;
+  console.log(`Seeded ${N} profiles for "${ORG}" (${store.backend}). Average HCI: ${avg}`);
+  process.exit(0);
 }
 
-const profiles = store.allProfiles();
-const avg = Math.round((profiles.reduce((a, p) => a + p.hci, 0) / profiles.length) * 10) / 10;
-console.log(`Seeded ${N} profiles for "${ORG}". Average HCI: ${avg}`);
+main().catch((e) => { console.error('Seed failed:', e); process.exit(1); });

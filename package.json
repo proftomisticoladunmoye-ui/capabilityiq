@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
     "dev": "node --env-file-if-exists=.env --watch server.js",
-    "seed": "node scripts/seed.js"
+    "seed": "node --env-file-if-exists=.env scripts/seed.js",
+    "test": "node --test"
   },
   "keywords": [
     "human-capability",
@@ -24,9 +25,13 @@
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
+    "pg": "^8.13.1",
     "pptxgenjs": "^4.0.1"
   },
+  "devDependencies": {
+    "pg-mem": "^3.0.5"
+  },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.6"
   }
 }

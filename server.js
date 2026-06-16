@@ -3,6 +3,7 @@
 // portfolio, benchmarking, institutional analytics, research and reporting.
 // Auth: password accounts + opaque revocable session tokens + role-based access
 // control + an audit trail. OAuth (Google/Microsoft/Apple) plugs in where marked.
+// Data layer: PostgreSQL when DATABASE_URL is set, else a local JSON file store.
 
 import express from 'express';
 import { dirname, join } from 'node:path';
@@ -11,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { DIMENSIONS, LEVELS } from './src/capabilities.js';
 import { buildAssessment, scoreResponses } from './src/assessment.js';
 import { buildProfile } from './src/hci.js';
-import { store } from './src/store.js';
+import { store, initStore } from './src/store.js';
 import { coach, COACH_ROLES } from './src/ai-coach.js';
 import { profileToCSV, profileToHTML, portfolioAnalytics } from './src/reports.js';
 import { analyseCohort, correlationMatrix } from './src/psychometrics.js';
@@ -32,17 +33,20 @@ app.set('trust proxy', true);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(join(__dirname, 'public')));
 
+// Wrap async route handlers so rejected promises reach the error handler.
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 // ---- auth middleware ----------------------------------------------------
 // Populate req.user from the Bearer token on every request (best-effort).
-app.use((req, _res, next) => {
+app.use(wrap(async (req, _res, next) => {
   const header = req.get('authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : null;
   if (token) {
-    const session = store.getSession(token);
-    if (session) { req.user = store.getUser(session.userId); req.token = token; }
+    const session = await store.getSession(token);
+    if (session) { req.user = await store.getUser(session.userId); req.token = token; }
   }
   next();
-});
+}));
 
 const requireAuth = (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'authentication required' });
@@ -50,19 +54,19 @@ const requireAuth = (req, res, next) => {
 };
 
 // RBAC guard for a restricted area.
-const requireArea = (area) => (req, res, next) => {
+const requireArea = (area) => wrap(async (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'authentication required' });
   if (!canAccess(req.user.role, area)) {
-    store.audit({ actorId: req.user.id, actorEmail: req.user.email, action: 'access_denied', target: area, ip: req.ip });
+    await store.audit({ actorId: req.user.id, actorEmail: req.user.email, action: 'access_denied', target: area, ip: req.ip });
     return res.status(403).json({ error: `Your role (${req.user.role}) is not permitted to access ${area}.` });
   }
   next();
-};
+});
 
-const sessionPayload = (user) => ({
+const sessionPayload = async (user) => ({
   user: publicUser(user),
   allowed: allowedAreas(user.role),
-  hasProfile: !!store.latestProfile(user.id),
+  hasProfile: !!(await store.latestProfile(user.id)),
 });
 
 // ---- meta / framework (public) -----------------------------------------
@@ -75,44 +79,44 @@ app.get('/api/assessment', (_req, res) => {
 });
 
 // ---- authentication -----------------------------------------------------
-app.post('/api/auth/signup', (req, res) => {
+app.post('/api/auth/signup', wrap(async (req, res) => {
   const { name, email, password, role = 'individual', org } = req.body || {};
   const err = validateSignup({ name, email, password });
   if (err) return res.status(400).json({ error: err });
   if (!ROLES.includes(role)) return res.status(400).json({ error: 'invalid role' });
-  if (store.findUserByEmail(email)) return res.status(409).json({ error: 'An account with this email already exists' });
+  if (await store.findUserByEmail(email)) return res.status(409).json({ error: 'An account with this email already exists' });
 
-  const user = store.createUser({ name: name.trim(), email: email.toLowerCase(), role, org: org?.trim() || null, credentials: hashPassword(password) });
+  const user = await store.createUser({ name: name.trim(), email: email.toLowerCase(), role, org: org?.trim() || null, credentials: hashPassword(password) });
   const token = newToken();
-  store.createSession({ userId: user.id, token, expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString() });
-  store.audit({ actorId: user.id, actorEmail: user.email, action: 'signup', target: role, ip: req.ip });
-  res.json({ token, ...sessionPayload(user) });
-});
+  await store.createSession({ userId: user.id, token, expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString() });
+  await store.audit({ actorId: user.id, actorEmail: user.email, action: 'signup', target: role, ip: req.ip });
+  res.json({ token, ...(await sessionPayload(user)) });
+}));
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', wrap(async (req, res) => {
   const { email, password } = req.body || {};
-  const user = store.findUserByEmail(email);
+  const user = await store.findUserByEmail(email);
   if (!user || !verifyPassword(password || '', user.passwordSalt, user.passwordHash)) {
-    store.audit({ actorEmail: email, action: 'login_failed', ip: req.ip });
+    await store.audit({ actorEmail: email, action: 'login_failed', ip: req.ip });
     return res.status(401).json({ error: 'Invalid email or password' });
   }
   const token = newToken();
-  store.createSession({ userId: user.id, token, expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString() });
-  store.audit({ actorId: user.id, actorEmail: user.email, action: 'login', ip: req.ip });
-  res.json({ token, ...sessionPayload(user) });
-});
+  await store.createSession({ userId: user.id, token, expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString() });
+  await store.audit({ actorId: user.id, actorEmail: user.email, action: 'login', ip: req.ip });
+  res.json({ token, ...(await sessionPayload(user)) });
+}));
 
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', wrap(async (req, res) => {
   if (req.token) {
-    store.deleteSession(req.token);
-    if (req.user) store.audit({ actorId: req.user.id, actorEmail: req.user.email, action: 'logout', ip: req.ip });
+    await store.deleteSession(req.token);
+    if (req.user) await store.audit({ actorId: req.user.id, actorEmail: req.user.email, action: 'logout', ip: req.ip });
   }
   res.json({ ok: true });
-});
+}));
 
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json({ ...sessionPayload(req.user), profile: store.latestProfile(req.user.id) });
-});
+app.get('/api/auth/me', requireAuth, wrap(async (req, res) => {
+  res.json({ ...(await sessionPayload(req.user)), profile: await store.latestProfile(req.user.id) });
+}));
 
 // OAuth integration seam. With provider credentials configured (CLIENT_ID/SECRET +
 // redirect URI) these endpoints would run the standard authorization-code flow and
@@ -128,51 +132,52 @@ app.post('/api/auth/oauth/:provider', (req, res) => {
 });
 
 // ---- assessment submission ---------------------------------------------
-app.post('/api/assessment/submit', requireAuth, (req, res) => {
+app.post('/api/assessment/submit', requireAuth, wrap(async (req, res) => {
   const responses = req.body?.responses || {};
   const scored = scoreResponses(responses);
   if (scored.answered === 0) return res.status(400).json({ error: 'no responses' });
   const profile = buildProfile(scored);
-  store.saveResponses(req.user.id, responses);
-  const saved = store.saveProfile(req.user.id, profile);
+  await store.saveResponses(req.user.id, responses);
+  const saved = await store.saveProfile(req.user.id, profile);
   res.json({ profile: saved });
-});
+}));
 
-app.get('/api/profile', requireAuth, (req, res) => {
-  const profile = store.latestProfile(req.user.id);
+app.get('/api/profile', requireAuth, wrap(async (req, res) => {
+  const profile = await store.latestProfile(req.user.id);
   if (!profile) return res.status(404).json({ error: 'no profile' });
-  res.json({ profile, history: store.profileHistory(req.user.id).map((p) => ({ at: p.generatedAt, hci: p.hci })) });
-});
+  const history = await store.profileHistory(req.user.id);
+  res.json({ profile, history: history.map((p) => ({ at: p.generatedAt, hci: p.hci })) });
+}));
 
 // ---- AI coach -----------------------------------------------------------
-app.post('/api/coach', requireAuth, async (req, res) => {
+app.post('/api/coach', requireAuth, wrap(async (req, res) => {
   const { message, role } = req.body || {};
   if (!message) return res.status(400).json({ error: 'message required' });
-  const profile = store.latestProfile(req.user.id);
+  const profile = await store.latestProfile(req.user.id);
   const out = await coach({ message, role, profile });
-  store.logAI(req.user.id, { role, message, answer: out.answer, source: out.source });
+  await store.logAI(req.user.id, { role, message, answer: out.answer, source: out.source });
   res.json(out);
-});
+}));
 
 // ---- portfolio ----------------------------------------------------------
-app.get('/api/portfolio', requireAuth, (req, res) => {
-  const items = store.listPortfolio(req.user.id);
+app.get('/api/portfolio', requireAuth, wrap(async (req, res) => {
+  const items = await store.listPortfolio(req.user.id);
   res.json({ items, analytics: portfolioAnalytics(items) });
-});
+}));
 
-app.post('/api/portfolio', requireAuth, (req, res) => {
-  const item = store.addPortfolioItem(req.user.id, req.body || {});
-  res.json({ item, analytics: portfolioAnalytics(store.listPortfolio(req.user.id)) });
-});
+app.post('/api/portfolio', requireAuth, wrap(async (req, res) => {
+  const item = await store.addPortfolioItem(req.user.id, req.body || {});
+  res.json({ item, analytics: portfolioAnalytics(await store.listPortfolio(req.user.id)) });
+}));
 
-app.delete('/api/portfolio/:id', requireAuth, (req, res) => {
-  store.deletePortfolioItem(req.user.id, req.params.id);
-  res.json({ analytics: portfolioAnalytics(store.listPortfolio(req.user.id)) });
-});
+app.delete('/api/portfolio/:id', requireAuth, wrap(async (req, res) => {
+  await store.deletePortfolioItem(req.user.id, req.params.id);
+  res.json({ analytics: portfolioAnalytics(await store.listPortfolio(req.user.id)) });
+}));
 
 // ---- institutional analytics (RBAC: institutional roles) ---------------
-app.get('/api/institutional', requireArea('institutional'), (req, res) => {
-  const profiles = store.allProfiles();
+app.get('/api/institutional', requireArea('institutional'), wrap(async (req, res) => {
+  const profiles = await store.allProfiles();
   const n = profiles.length;
   const r1 = (x) => Math.round(x * 10) / 10;
   const mean = (sel) => (n ? r1(profiles.reduce((a, p) => a + (sel(p) || 0), 0) / n) : 0);
@@ -208,48 +213,48 @@ app.get('/api/institutional', requireArea('institutional'), (req, res) => {
     bottomDimensions: sorted.slice(-3).reverse(),
     dimMeans, distribution,
   });
-});
+}));
 
 // ---- research analytics (RBAC: research roles) -------------------------
-app.get('/api/research/psychometrics', requireArea('research'), (_req, res) => {
-  const records = store.raw().responses;
+app.get('/api/research/psychometrics', requireArea('research'), wrap(async (_req, res) => {
+  const records = await store.allResponses();
   if (!records.length) return res.json({ empty: true });
   res.json(analyseCohort(records));
-});
+}));
 
-app.get('/api/research/correlation/:dimensionId', requireArea('research'), (req, res) => {
-  const m = correlationMatrix(store.raw().responses, req.params.dimensionId);
+app.get('/api/research/correlation/:dimensionId', requireArea('research'), wrap(async (req, res) => {
+  const m = correlationMatrix(await store.allResponses(), req.params.dimensionId);
   if (!m) return res.status(404).json({ error: 'unknown dimension' });
   res.json(m);
-});
+}));
 
-app.get('/api/research/efa', requireArea('research'), (req, res) => {
-  const records = store.raw().responses;
+app.get('/api/research/efa', requireArea('research'), wrap(async (req, res) => {
+  const records = await store.allResponses();
   if (!records.length) return res.json({ empty: true, reason: 'no responses' });
   const maxFactors = Math.max(1, Math.min(6, Number(req.query.maxFactors) || 4));
   res.json(runEFA(records, { maxFactors }));
-});
+}));
 
-app.get('/api/research/cfa', requireArea('research'), (_req, res) => {
-  const records = store.raw().responses;
+app.get('/api/research/cfa', requireArea('research'), wrap(async (_req, res) => {
+  const records = await store.allResponses();
   if (!records.length) return res.json({ empty: true, reason: 'no responses' });
   res.json(runCFA(records));
-});
+}));
 
-app.get('/api/research/rasch/:dimensionId', requireArea('research'), (req, res) => {
-  const records = store.raw().responses;
+app.get('/api/research/rasch/:dimensionId', requireArea('research'), wrap(async (req, res) => {
+  const records = await store.allResponses();
   if (!records.length) return res.json({ empty: true, reason: 'no responses' });
   res.json(calibrateDimension(records, req.params.dimensionId));
-});
+}));
 
 // ---- audit trail (RBAC: institutional roles) ---------------------------
-app.get('/api/audit', requireArea('audit'), (_req, res) => {
-  res.json({ entries: store.recentAudit(30) });
-});
+app.get('/api/audit', requireArea('audit'), wrap(async (_req, res) => {
+  res.json({ entries: await store.recentAudit(30) });
+}));
 
 // ---- exports (authenticated; profile owner) ----------------------------
 function logExport(req, format) {
-  store.audit({ actorId: req.user.id, actorEmail: req.user.email, action: 'export', target: format, ip: req.ip });
+  return store.audit({ actorId: req.user.id, actorEmail: req.user.email, action: 'export', target: format, ip: req.ip });
 }
 async function sendDoc(res, builder, profile, user, filename, mime) {
   try {
@@ -262,54 +267,54 @@ async function sendDoc(res, builder, profile, user, filename, mime) {
   }
 }
 
-app.get('/api/report.docx', requireAuth, (req, res) => {
-  const profile = store.latestProfile(req.user.id);
+app.get('/api/report.docx', requireAuth, wrap(async (req, res) => {
+  const profile = await store.latestProfile(req.user.id);
   if (!profile) return res.status(404).send('no profile');
-  logExport(req, 'docx');
-  sendDoc(res, buildDocx, profile, req.user, 'capability-iq-report.docx',
+  await logExport(req, 'docx');
+  await sendDoc(res, buildDocx, profile, req.user, 'capability-iq-report.docx',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-});
+}));
 
-app.get('/api/report.xlsx', requireAuth, (req, res) => {
-  const profile = store.latestProfile(req.user.id);
+app.get('/api/report.xlsx', requireAuth, wrap(async (req, res) => {
+  const profile = await store.latestProfile(req.user.id);
   if (!profile) return res.status(404).send('no profile');
-  logExport(req, 'xlsx');
-  sendDoc(res, buildXlsx, profile, req.user, 'capability-iq-report.xlsx',
+  await logExport(req, 'xlsx');
+  await sendDoc(res, buildXlsx, profile, req.user, 'capability-iq-report.xlsx',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-});
+}));
 
-app.get('/api/report.pptx', requireAuth, (req, res) => {
-  const profile = store.latestProfile(req.user.id);
+app.get('/api/report.pptx', requireAuth, wrap(async (req, res) => {
+  const profile = await store.latestProfile(req.user.id);
   if (!profile) return res.status(404).send('no profile');
-  logExport(req, 'pptx');
-  sendDoc(res, buildPptx, profile, req.user, 'capability-iq-report.pptx',
+  await logExport(req, 'pptx');
+  await sendDoc(res, buildPptx, profile, req.user, 'capability-iq-report.pptx',
     'application/vnd.openxmlformats-officedocument.presentationml.presentation');
-});
+}));
 
-app.get('/api/report.csv', requireAuth, (req, res) => {
-  const profile = store.latestProfile(req.user.id);
+app.get('/api/report.csv', requireAuth, wrap(async (req, res) => {
+  const profile = await store.latestProfile(req.user.id);
   if (!profile) return res.status(404).send('no profile');
-  logExport(req, 'csv');
+  await logExport(req, 'csv');
   res.setHeader('content-type', 'text/csv');
   res.setHeader('content-disposition', 'attachment; filename="capability-iq-report.csv"');
   res.send(profileToCSV(profile));
-});
+}));
 
-app.get('/api/report.json', requireAuth, (req, res) => {
-  const profile = store.latestProfile(req.user.id);
+app.get('/api/report.json', requireAuth, wrap(async (req, res) => {
+  const profile = await store.latestProfile(req.user.id);
   if (!profile) return res.status(404).json({ error: 'no profile' });
-  logExport(req, 'json');
+  await logExport(req, 'json');
   res.setHeader('content-disposition', 'attachment; filename="capability-iq-report.json"');
   res.json(profile);
-});
+}));
 
-app.get('/api/report.html', requireAuth, (req, res) => {
-  const profile = store.latestProfile(req.user.id);
+app.get('/api/report.html', requireAuth, wrap(async (req, res) => {
+  const profile = await store.latestProfile(req.user.id);
   if (!profile) return res.status(404).send('no profile');
-  logExport(req, 'pdf');
+  await logExport(req, 'pdf');
   res.setHeader('content-type', 'text/html');
   res.send(profileToHTML(profile, req.user));
-});
+}));
 
 // Unmatched API routes return JSON 404 (never the SPA HTML shell).
 app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
@@ -329,17 +334,25 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: 'internal server error' });
 });
 
-app.listen(PORT, () => {
-  const llmKey =
-    process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
-  const provider = process.env.ANTHROPIC_API_KEY
-    ? 'Anthropic'
-    : process.env.OPENAI_API_KEY
-      ? 'OpenAI'
-      : process.env.OPENROUTER_API_KEY
-        ? `OpenRouter (${process.env.OPENROUTER_MODEL || 'anthropic/claude-opus-4.8'})`
-        : null;
-  const ai = llmKey ? `LLM-connected · ${provider}` : 'deterministic engine';
-  console.log(`\n  Capability IQ™  ·  http://localhost:${PORT}`);
-  console.log(`  AI Coach: ${ai}  ·  Auth: password + RBAC\n`);
-});
+// ---- boot ---------------------------------------------------------------
+initStore()
+  .then(() => {
+    app.listen(PORT, () => {
+      const llmKey =
+        process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
+      const provider = process.env.ANTHROPIC_API_KEY
+        ? 'Anthropic'
+        : process.env.OPENAI_API_KEY
+          ? 'OpenAI'
+          : process.env.OPENROUTER_API_KEY
+            ? `OpenRouter (${process.env.OPENROUTER_MODEL || 'anthropic/claude-opus-4.8'})`
+            : null;
+      const ai = llmKey ? `LLM-connected · ${provider}` : 'deterministic engine';
+      console.log(`\n  Capability IQ™  ·  http://localhost:${PORT}`);
+      console.log(`  Data: ${store.backend}  ·  AI Coach: ${ai}  ·  Auth: password + RBAC\n`);
+    });
+  })
+  .catch((e) => {
+    console.error('Failed to initialise data store:', e);
+    process.exit(1);
+  });
