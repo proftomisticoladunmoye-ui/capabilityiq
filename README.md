@@ -1,5 +1,7 @@
 # Capability IQ™
 
+[![CI](https://github.com/proftomisticoladunmoye-ui/capabilityiq/actions/workflows/ci.yml/badge.svg)](https://github.com/proftomisticoladunmoye-ui/capabilityiq/actions/workflows/ci.yml)
+
 ### Measure. Develop. Predict. Amplify Human Capability.
 
 A **Human Capability Intelligence Platform** — the operating system for measuring,
