@@ -27,7 +27,8 @@ dashboard. No database or API keys are required locally — the platform runs fu
 standalone on a JSON file store and the deterministic AI coach.
 
 > If port 3000 is busy, set `PORT` (e.g. `set PORT=4000 && npm start` on Windows,
-> `PORT=4000 npm start` on macOS/Linux). Run the test suite with `npm test`.
+> `PORT=4000 npm start` on macOS/Linux). Run the test suite with `npm test`. For the
+> CI and `main` branch-protection workflow, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Deploy
 
