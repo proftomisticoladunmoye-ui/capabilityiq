@@ -1,0 +1,22 @@
+# Render Blueprint — deploys Capability IQ as a Node web service.
+# Data lives in an external Neon Postgres (set DATABASE_URL in the dashboard), so the
+# free plan's ephemeral disk doesn't matter. See DEPLOYMENT.md for the full walkthrough.
+services:
+  - type: web
+    name: capability-iq
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/framework
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Neon connection string — paste it in the Render dashboard (kept secret).
+      - key: DATABASE_URL
+        sync: false
+      # OpenRouter key powers the AI coach — paste in the dashboard (kept secret).
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: anthropic/claude-opus-4.8

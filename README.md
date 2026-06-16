@@ -21,10 +21,21 @@ npm start        # → http://localhost:3000
 ```
 
 Then open the URL, click **Get started**, complete the assessment, and explore your
-dashboard. No database or API keys are required — the platform runs fully standalone.
+dashboard. No database or API keys are required locally — the platform runs fully
+standalone on a JSON file store and the deterministic AI coach.
 
 > If port 3000 is busy, set `PORT` (e.g. `set PORT=4000 && npm start` on Windows,
-> `PORT=4000 npm start` on macOS/Linux).
+> `PORT=4000 npm start` on macOS/Linux). Run the test suite with `npm test`.
+
+## Deploy
+
+Recommended: **Render** (app, auto-deploys from GitHub) + **Neon** (free persistent
+PostgreSQL) + your domain. The data layer switches to Postgres automatically when
+`DATABASE_URL` is set. Full walkthrough — including pointing a Hostinger domain at it —
+in **[DEPLOYMENT.md](DEPLOYMENT.md)**.
+
+> Hostinger *shared* hosting can't run this (it's PHP-only); use Render/a Node host, or a
+> Hostinger **VPS**.
 
 ---
 
@@ -73,7 +84,9 @@ capability-iq/
 │  ├─ auth.js             Password hashing, session tokens, RBAC policy
 │  ├─ exporters.js        Word / Excel / PowerPoint document generators
 │  ├─ reports.js          CSV / HTML(PDF) generation + portfolio analytics
-│  └─ store.js            Zero-dependency JSON persistence (repository-shaped)
+│  ├─ store.js            Backend selector (Postgres if DATABASE_URL, else JSON)
+│  ├─ store-pg.js         PostgreSQL backend (async)
+│  └─ store-json.js       JSON-file backend (async, local dev)
 ├─ public/
 │  ├─ index.html          SPA shell (Inter / Poppins / Merriweather, ECharts)
 │  ├─ css/styles.css      Design system: tokens, components, responsive grid
@@ -94,7 +107,9 @@ Python analytics. This reference build implements the **same domain logic and co
 in a single zero-friction Node.js service so the platform actually *runs and demonstrates*
 end-to-end. Each boundary is shaped for the production swap:
 
-- `store.js` exposes a repository interface → drop-in PostgreSQL/Prisma.
+- `store.js` selects a backend by `DATABASE_URL`: **PostgreSQL** (`store-pg.js`) in
+  production, or a local **JSON file** (`store-json.js`) for zero-config development —
+  both implement the same async interface.
 - The Express routes are the API contract → re-host under NestJS unchanged.
 - `hci.js`, `psychometrics.js`, `efa.js`, `cfa.js` and `irt.js` are pure functions → the
   Node analytics engine (descriptives, Cronbach α, McDonald's ω, item-total correlations,
